@@ -1,4 +1,14 @@
-export type ProjectStatus = "draft";
+export type ProjectStatus =
+  | "draft"
+  | "sources_added"
+  | "plan_generated"
+  | "plan_in_review"
+  | "plan_approved"
+  | "content_generating"
+  | "content_approved"
+  | "ready_for_delivery"
+  | "in_delivery"
+  | "completed";
 export type SourceType = "txt" | "md" | "pdf" | "docx" | "unsupported";
 export type SourceExtractionStatus = "ready" | "extracting" | "extracted" | "failed";
 export type ReviewStatus = "draft" | "in_review" | "changes_requested" | "approved" | "locked";

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { hasPermission } from "@/lib/auth";
+import { deriveProjectStatus, getStatusLabel, getStatusColor } from "@/lib/project-status";
 import {
   createTrainingProject,
   hasProjectInputErrors,
@@ -10,7 +11,11 @@ import {
   type NewTrainingProjectInput,
   type TrainingProject
 } from "@/lib/training-projects";
+import { loadContentArtifacts } from "./content-artifact-storage";
+import { loadDeliveryState } from "./delivery-storage";
+import { loadProgramPlans } from "./program-plan-storage";
 import { loadTrainingProjects, saveTrainingProjects } from "./project-storage";
+import { loadSourceDocuments } from "./source-storage";
 import { RoleSwitcher, useCurrentUser } from "../role-switcher";
 
 const emptyInput: NewTrainingProjectInput = {
@@ -186,10 +191,19 @@ export function ProjectsClient() {
             </p>
           ) : (
             <div className="project-cards">
-              {projects.map((project) => (
+              {projects.map((project) => {
+                const status = deriveProjectStatus({
+                  sources: loadSourceDocuments(project.id),
+                  plans: loadProgramPlans(project.id),
+                  artifacts: loadContentArtifacts(project.id),
+                  cohorts: loadDeliveryState(project.id).cohorts
+                });
+                return (
                 <article className="project-card" key={project.id}>
                   <div>
-                    <span className="badge">{project.status}</span>
+                    <span className={`badge badge-${getStatusColor(status)}`}>
+                      {getStatusLabel(status)}
+                    </span>
                     <h3>{project.name}</h3>
                     <p className="muted">{project.businessGoal}</p>
                   </div>
@@ -211,7 +225,8 @@ export function ProjectsClient() {
                     Open project
                   </Link>
                 </article>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

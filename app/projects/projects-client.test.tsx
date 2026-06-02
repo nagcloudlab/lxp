@@ -37,7 +37,7 @@ describe("ProjectsClient", () => {
         name: /AI Tools for Business Productivity/i
       })
     ).toBeInTheDocument();
-    expect(screen.getByText("draft")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
 
     const stored = window.localStorage.getItem(projectStorageKey);
     expect(stored).toContain("AI Tools for Business Productivity");

@@ -27,6 +27,7 @@ import {
   createProgramPackageFilename
 } from "@/lib/program-package-exporter";
 import { hasPermission } from "@/lib/auth";
+import { deriveProjectStatus, getStatusLabel, getStatusColor } from "@/lib/project-status";
 import {
   createAuditEvent,
   formatAuditEventLabel
@@ -181,6 +182,12 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     (artifact) => artifact.status === "approved"
   ).length;
   const canExportPackage = Boolean(lockedPlan && approvedArtifactCount > 0);
+  const projectStatus = deriveProjectStatus({
+    sources,
+    plans,
+    artifacts,
+    cohorts: deliveryState.cohorts
+  });
   const leadershipReport = project
     ? buildB2BLeadershipReport({
         project,
@@ -688,9 +695,12 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     <main className="main">
       <section className="workspace-header">
         <div>
-          <p className="eyebrow">Draft training project</p>
+          <p className="eyebrow">Training project</p>
           <h1>{project.name}</h1>
           <p className="lead">{project.businessGoal}</p>
+          <span className={`badge badge-${getStatusColor(projectStatus)}`}>
+            {getStatusLabel(projectStatus)}
+          </span>
         </div>
         <div className="header-actions">
           <RoleSwitcher />
