@@ -42,6 +42,7 @@ export default function Home() {
           <a href="#workflow">Workflow</a>
           <a href="#mvp">MVP</a>
           <a href="#metrics">Metrics</a>
+          <Link href="/login" className="button primary">Sign in</Link>
         </nav>
       </header>
 

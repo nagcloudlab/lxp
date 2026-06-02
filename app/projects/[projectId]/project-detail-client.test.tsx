@@ -1,23 +1,23 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getContentArtifactStorageKey,
-  getDeliveryStorageKey,
-  getSourceStorageKey,
-  getProgramPlanStorageKey,
-  projectStorageKey,
-  type TrainingProject
-} from "@/lib/training-projects";
+import type { TrainingProject } from "@/lib/training-projects";
 import { ProjectDetailClient } from "./project-detail-client";
 
-function setTestUser(role: "ld_admin" | "sme") {
-  const users = {
-    ld_admin: { id: "user_admin", name: "Admin User", email: "admin@company.com", role: "ld_admin" },
-    sme: { id: "user_sme", name: "Dr. Sarah Chen", email: "sarah@company.com", role: "sme" }
-  };
-  window.localStorage.setItem("lxp.currentUser.v1", JSON.stringify(users[role]));
-}
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: null, status: "unauthenticated" })),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children
+}));
+
+const emptyDelivery = {
+  cohorts: [],
+  enrollments: [],
+  progressEvents: [],
+  quizAttempts: [],
+  smeAlerts: []
+};
 
 const project: TrainingProject = {
   id: "project_1",
@@ -32,16 +32,71 @@ const project: TrainingProject = {
   createdAt: "2026-05-28T00:00:00.000Z"
 };
 
+vi.mock("@/lib/data-api", () => ({
+  fetchProjects: vi.fn(() => Promise.resolve([project])),
+  fetchSources: vi.fn(() => Promise.resolve([])),
+  apiCreateSource: vi.fn((_, s: unknown) => Promise.resolve(s)),
+  apiUpdateSource: vi.fn(() => Promise.resolve({})),
+  fetchPlans: vi.fn(() => Promise.resolve([])),
+  apiCreatePlan: vi.fn((_, p: unknown) => Promise.resolve(p)),
+  apiUpdatePlan: vi.fn(() => Promise.resolve({})),
+  fetchArtifacts: vi.fn(() => Promise.resolve([])),
+  apiCreateArtifact: vi.fn((_, a: unknown) => Promise.resolve(a)),
+  apiUpdateArtifact: vi.fn(() => Promise.resolve({})),
+  fetchDeliveryState: vi.fn(() => Promise.resolve(emptyDelivery)),
+  apiCreateCohort: vi.fn((_, c: unknown) => Promise.resolve(c)),
+  apiCreateEnrollment: vi.fn((_, e: unknown) => Promise.resolve(e)),
+  apiCreateProgressEvent: vi.fn((_, e: unknown) => Promise.resolve(e)),
+  apiCreateQuizAttempt: vi.fn((_, a: unknown) => Promise.resolve(a)),
+  apiCreateSMEAlert: vi.fn((_, a: unknown) => Promise.resolve(a)),
+  fetchComments: vi.fn(() => Promise.resolve([])),
+  apiCreateComment: vi.fn((_, c: unknown) => Promise.resolve(c)),
+  apiUpdateComment: vi.fn(() => Promise.resolve({})),
+  fetchAuditLog: vi.fn(() => Promise.resolve([])),
+  apiCreateAuditEvent: vi.fn((_, e: unknown) => Promise.resolve(e))
+}));
+
+function setTestUser(role: "ld_admin" | "sme") {
+  const users = {
+    ld_admin: { id: "user_admin", name: "Admin User", email: "admin@company.com", role: "ld_admin" },
+    sme: { id: "user_sme", name: "Dr. Sarah Chen", email: "sarah@company.com", role: "sme" }
+  };
+  window.localStorage.setItem("lxp.currentUser.v1", JSON.stringify(users[role]));
+}
+
+// Mock the ai-status fetch separately
+const originalFetch = globalThis.fetch;
+
 describe("ProjectDetailClient", () => {
   beforeEach(() => {
     window.localStorage.clear();
     setTestUser("ld_admin");
-    window.localStorage.setItem(projectStorageKey, JSON.stringify([project]));
+    vi.clearAllMocks();
+
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/ai-status") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "offline", message: "Test" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+      return originalFetch(input);
+    }) as typeof fetch;
   });
+
+  async function waitForLoaded() {
+    await waitFor(() => {
+      expect(screen.queryByText("Loading project...")).not.toBeInTheDocument();
+    });
+  }
 
   it("uploads, extracts, previews, and excludes a text source", async () => {
     const user = userEvent.setup();
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     const file = new File(["Employees need safe AI prompting."], "notes.md", {
       type: "text/markdown"
@@ -58,14 +113,15 @@ describe("ProjectDetailClient", () => {
     await user.click(screen.getByRole("button", { name: /exclude source/i }));
 
     expect(screen.getByText(/1 sources uploaded, 0 active/i)).toBeInTheDocument();
-    expect(window.localStorage.getItem(getSourceStorageKey(project.id))).toContain(
-      "\"isActiveForGeneration\":false"
-    );
+
+    const { apiUpdateSource } = await import("@/lib/data-api");
+    expect(apiUpdateSource).toHaveBeenCalled();
   });
 
   it("generates a draft program plan from active sources", async () => {
     const user = userEvent.setup();
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     const file = new File(
       ["AI prompting, confidential data, practical tasks, 3 hours and 6 hours."],
@@ -86,14 +142,15 @@ describe("ProjectDetailClient", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Duration conflict detected/i)).toBeInTheDocument();
     expect(screen.getByText(/AI Tool Basics and Safe Use/i)).toBeInTheDocument();
-    expect(window.localStorage.getItem(getProgramPlanStorageKey(project.id))).toContain(
-      "program-plan-deterministic-v1"
-    );
+
+    const { apiCreatePlan } = await import("@/lib/data-api");
+    expect(apiCreatePlan).toHaveBeenCalled();
   });
 
   it("moves a generated plan through SME approval and locking", async () => {
     const user = userEvent.setup();
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     const file = new File(["AI prompting and practical tasks."], "notes.md", {
       type: "text/markdown"
@@ -111,14 +168,15 @@ describe("ProjectDetailClient", () => {
 
     await user.click(screen.getByRole("button", { name: /lock approved toc/i }));
     expect(screen.getAllByText("locked").length).toBeGreaterThan(0);
-    expect(window.localStorage.getItem(getProgramPlanStorageKey(project.id))).toContain(
-      "\"status\":\"locked\""
-    );
+
+    const { apiUpdatePlan } = await import("@/lib/data-api");
+    expect(apiUpdatePlan).toHaveBeenCalledTimes(3);
   });
 
   it("generates and approves content artifacts only after TOC lock", async () => {
     const user = userEvent.setup();
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     expect(
       screen.getByRole("button", { name: /generate content package/i })
@@ -151,9 +209,8 @@ describe("ProjectDetailClient", () => {
 
     await user.click(screen.getAllByRole("button", { name: /approve artifact/i })[0]);
 
-    expect(window.localStorage.getItem(getContentArtifactStorageKey(project.id))).toContain(
-      "\"status\":\"approved\""
-    );
+    const { apiUpdateArtifact } = await import("@/lib/data-api");
+    expect(apiUpdateArtifact).toHaveBeenCalled();
   });
 
   it("exports a JSON package after at least one artifact is approved", async () => {
@@ -181,6 +238,7 @@ describe("ProjectDetailClient", () => {
     });
 
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     const file = new File(["AI prompting and practical tasks."], "notes.md", {
       type: "text/markdown"
@@ -208,6 +266,7 @@ describe("ProjectDetailClient", () => {
   it("creates a cohort, enrolls a learner, tracks progress, and raises SME alerts", async () => {
     const user = userEvent.setup();
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     const file = new File(["AI prompting and practical tasks."], "notes.md", {
       type: "text/markdown"
@@ -248,9 +307,10 @@ describe("ProjectDetailClient", () => {
     await user.click(screen.getByRole("button", { name: /request help/i }));
     expect(screen.getByText(/requested help/i)).toBeInTheDocument();
 
-    expect(window.localStorage.getItem(getDeliveryStorageKey(project.id))).toContain(
-      "quiz_failed_twice"
-    );
+    const { apiCreateCohort, apiCreateQuizAttempt, apiCreateSMEAlert } = await import("@/lib/data-api");
+    expect(apiCreateCohort).toHaveBeenCalled();
+    expect(apiCreateQuizAttempt).toHaveBeenCalled();
+    expect(apiCreateSMEAlert).toHaveBeenCalled();
   });
 
   it("downloads the B2B leadership report", async () => {
@@ -278,6 +338,7 @@ describe("ProjectDetailClient", () => {
     });
 
     render(<ProjectDetailClient projectId={project.id} />);
+    await waitForLoaded();
 
     await user.click(
       screen.getByRole("button", { name: /download leadership report/i })

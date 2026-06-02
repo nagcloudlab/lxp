@@ -1,22 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { hasPermission } from "@/lib/auth";
-import { deriveProjectStatus, getStatusLabel, getStatusColor } from "@/lib/project-status";
+import { getStatusLabel, getStatusColor } from "@/lib/project-status";
 import {
   createTrainingProject,
   hasProjectInputErrors,
   validateProjectInput,
   type NewTrainingProjectInput,
+  type ProjectStatus,
   type TrainingProject
 } from "@/lib/training-projects";
-import { loadContentArtifacts } from "./content-artifact-storage";
-import { loadDeliveryState } from "./delivery-storage";
-import { loadProgramPlans } from "./program-plan-storage";
-import { loadTrainingProjects, saveTrainingProjects } from "./project-storage";
-import { loadSourceDocuments } from "./source-storage";
+import { fetchProjects, apiCreateProject } from "@/lib/data-api";
 import { RoleSwitcher, useCurrentUser } from "../role-switcher";
+
+type ProjectWithStatus = TrainingProject & { computedStatus: ProjectStatus };
 
 const emptyInput: NewTrainingProjectInput = {
   name: "",
@@ -31,11 +30,16 @@ const emptyInput: NewTrainingProjectInput = {
 export function ProjectsClient() {
   const currentUser = useCurrentUser();
   const canCreate = hasPermission(currentUser.role, "create_project");
-  const [projects, setProjects] = useState<TrainingProject[]>(
-    loadTrainingProjects
-  );
+  const [projects, setProjects] = useState<ProjectWithStatus[]>([]);
+  const [loading, setLoading] = useState(true);
   const [input, setInput] = useState<NewTrainingProjectInput>(emptyInput);
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    fetchProjects()
+      .then((data) => setProjects(data as ProjectWithStatus[]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const errors = useMemo(() => validateProjectInput(input), [input]);
 
@@ -46,7 +50,7 @@ export function ProjectsClient() {
     setInput((current) => ({ ...current, [field]: value }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitted(true);
 
@@ -55,9 +59,9 @@ export function ProjectsClient() {
     }
 
     const project = createTrainingProject(input);
-    const nextProjects = [project, ...projects];
-    setProjects(nextProjects);
-    saveTrainingProjects(nextProjects);
+    const withStatus: ProjectWithStatus = { ...project, computedStatus: "draft" };
+    setProjects((prev) => [withStatus, ...prev]);
+    await apiCreateProject(project);
     setInput(emptyInput);
     setSubmitted(false);
   }
@@ -185,24 +189,19 @@ export function ProjectsClient() {
             <p className="eyebrow">Draft pipeline</p>
             <h2>{projects.length} training projects</h2>
           </div>
-          {projects.length === 0 ? (
+          {loading ? (
+            <p className="muted">Loading projects...</p>
+          ) : projects.length === 0 ? (
             <p className="muted">
               No projects yet. Create the first Corporate L&D training project.
             </p>
           ) : (
             <div className="project-cards">
-              {projects.map((project) => {
-                const status = deriveProjectStatus({
-                  sources: loadSourceDocuments(project.id),
-                  plans: loadProgramPlans(project.id),
-                  artifacts: loadContentArtifacts(project.id),
-                  cohorts: loadDeliveryState(project.id).cohorts
-                });
-                return (
+              {projects.map((project) => (
                 <article className="project-card" key={project.id}>
                   <div>
-                    <span className={`badge badge-${getStatusColor(status)}`}>
-                      {getStatusLabel(status)}
+                    <span className={`badge badge-${getStatusColor(project.computedStatus)}`}>
+                      {getStatusLabel(project.computedStatus)}
                     </span>
                     <h3>{project.name}</h3>
                     <p className="muted">{project.businessGoal}</p>
@@ -225,8 +224,7 @@ export function ProjectsClient() {
                     Open project
                   </Link>
                 </article>
-                );
-              })}
+              ))}
             </div>
           )}
         </section>

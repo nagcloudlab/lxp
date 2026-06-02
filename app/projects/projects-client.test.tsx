@@ -1,17 +1,39 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
-import { projectStorageKey } from "@/lib/training-projects";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectsClient } from "./projects-client";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: null, status: "unauthenticated" })),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children
+}));
+
+vi.mock("@/lib/data-api", () => {
+  let store: unknown[] = [];
+  return {
+    fetchProjects: vi.fn(() => Promise.resolve(store)),
+    apiCreateProject: vi.fn((project: unknown) => {
+      store = [{ ...(project as Record<string, unknown>), computedStatus: "draft" }, ...store];
+      return Promise.resolve(project);
+    })
+  };
+});
 
 describe("ProjectsClient", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    vi.clearAllMocks();
   });
 
   it("creates and lists a draft Corporate L&D project", async () => {
     const user = userEvent.setup();
     render(<ProjectsClient />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/program name/i)).toBeInTheDocument();
+    });
 
     await user.type(
       screen.getByLabelText(/program name/i),
@@ -39,8 +61,7 @@ describe("ProjectsClient", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
 
-    const stored = window.localStorage.getItem(projectStorageKey);
-    expect(stored).toContain("AI Tools for Business Productivity");
+    const { apiCreateProject } = await import("@/lib/data-api");
+    expect(apiCreateProject).toHaveBeenCalled();
   });
 });
-

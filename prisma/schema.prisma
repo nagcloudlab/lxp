@@ -1,0 +1,200 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id       String @id
+  name     String
+  email    String @unique
+  password String
+  role     String @default("learner")
+}
+
+model TrainingProject {
+  id                    String   @id
+  name                  String
+  businessGoal          String
+  targetDepartment      String
+  expectedLearnerCount  Int
+  targetCompletionDate  String
+  learnerRoles          String
+  assignedSme           String
+  status                String   @default("draft")
+  createdAt             String
+
+  sources          SourceDocument[]
+  programPlans     ProgramPlan[]
+  contentArtifacts ContentArtifact[]
+  cohorts          Cohort[]
+  enrollments      Enrollment[]
+  progressEvents   ProgressEvent[]
+  quizAttempts     QuizAttempt[]
+  smeAlerts        SMEAlert[]
+  reviewComments   ReviewComment[]
+  auditEvents      AuditEvent[]
+}
+
+model SourceDocument {
+  id                   String  @id
+  projectId            String
+  filename             String
+  sourceType           String
+  extractionStatus     String  @default("ready")
+  isActiveForGeneration Boolean @default(true)
+  extractedText        String  @default("")
+  extractionError      String?
+  createdAt            String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ProgramPlan {
+  id                   String @id
+  projectId            String
+  versionNumber        Int
+  title                String
+  status               String @default("draft")
+  sourceDocumentIds    String @default("[]")
+  generationMetadata   String @default("{}")
+  requirementSummary   String @default("")
+  businessContext      String @default("")
+  targetAudience       String @default("")
+  assumptions          String @default("[]")
+  conflicts            String @default("[]")
+  learnerRoles         String @default("[]")
+  modules              String @default("[]")
+  assessmentBlueprint  String @default("{}")
+  createdAt            String
+
+  project          TrainingProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentArtifacts ContentArtifact[]
+  planCohorts      Cohort[]
+}
+
+model ContentArtifact {
+  id                 String  @id
+  projectId          String
+  planId             String
+  artifactType       String
+  title              String
+  contentBody        String  @default("")
+  status             String  @default("draft")
+  sourceDocumentIds  String  @default("[]")
+  generationMetadata String  @default("{}")
+  approvedAt         String?
+  createdAt          String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plan    ProgramPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+}
+
+model Cohort {
+  id             String @id
+  projectId      String
+  planId         String
+  name           String
+  status         String @default("draft")
+  startDate      String
+  endDate        String
+  instructorName String
+  createdAt      String
+
+  project     TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  plan        ProgramPlan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  enrollments Enrollment[]
+}
+
+model Enrollment {
+  id             String @id
+  projectId      String
+  cohortId       String
+  learnerName    String
+  learnerEmail   String
+  learnerRoleId  String
+  learnerRoleName String
+  status         String @default("enrolled")
+  enrolledAt     String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cohort  Cohort          @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+}
+
+model ProgressEvent {
+  id           String  @id
+  projectId    String
+  cohortId     String
+  enrollmentId String
+  moduleId     String?
+  eventType    String
+  eventData    String  @default("{}")
+  createdAt    String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model QuizAttempt {
+  id           String  @id
+  projectId    String
+  cohortId     String
+  enrollmentId String
+  moduleId     String
+  score        Float
+  maxScore     Float
+  passed       Boolean
+  submittedAt  String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model SMEAlert {
+  id                String  @id
+  projectId         String
+  cohortId          String
+  enrollmentId      String
+  moduleId          String?
+  triggerReason     String
+  evidence          String
+  recommendedAction String
+  status            String  @default("open")
+  resolverNotes     String?
+  createdAt         String
+  resolvedAt        String?
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ReviewComment {
+  id          String  @id
+  projectId   String
+  targetType  String
+  targetId    String
+  targetLabel String
+  authorRole  String
+  authorName  String
+  body        String
+  status      String  @default("open")
+  resolvedBy  String?
+  resolvedAt  String?
+  createdAt   String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id          String  @id
+  projectId   String
+  eventType   String
+  actor       String
+  targetType  String?
+  targetId    String?
+  targetLabel String?
+  details     String  @default("{}")
+  createdAt   String
+
+  project TrainingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}

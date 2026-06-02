@@ -7,7 +7,6 @@ import {
   createB2BReportFilename
 } from "@/lib/b2b-report-builder";
 import {
-  generateContentArtifacts,
   generateContentArtifactsAsync
 } from "@/lib/content-artifact-generator";
 import {
@@ -19,7 +18,6 @@ import {
   shouldCreateQuizFailureAlert
 } from "@/lib/delivery-workflow";
 import {
-  generateProgramPlan,
   generateProgramPlanAsync
 } from "@/lib/program-plan-generator";
 import {
@@ -52,23 +50,42 @@ import type {
   TrainingProject
 } from "@/lib/training-projects";
 import {
-  loadContentArtifacts,
-  saveContentArtifacts
-} from "../content-artifact-storage";
-import { loadDeliveryState, saveDeliveryState } from "../delivery-storage";
-import { loadProgramPlans, saveProgramPlans } from "../program-plan-storage";
+  fetchProjects,
+  fetchSources,
+  apiCreateSource,
+  apiUpdateSource,
+  fetchPlans,
+  apiCreatePlan,
+  apiUpdatePlan,
+  fetchArtifacts,
+  apiCreateArtifact,
+  apiUpdateArtifact,
+  fetchDeliveryState,
+  apiCreateCohort,
+  apiCreateEnrollment,
+  apiCreateProgressEvent,
+  apiCreateQuizAttempt,
+  apiCreateSMEAlert,
+  fetchComments,
+  apiCreateComment,
+  apiUpdateComment,
+  fetchAuditLog,
+  apiCreateAuditEvent,
+  type DeliveryState
+} from "@/lib/data-api";
 import { extractSourceDocument } from "../source-extraction";
-import { loadSourceDocuments, saveSourceDocuments } from "../source-storage";
-import { loadTrainingProjects } from "../project-storage";
 import { DeliveryWorkspace } from "./delivery-workspace";
 import { ProgramPlanPreview } from "./plan-preview";
 import { ReviewThread } from "./review-thread";
 import { RoleSwitcher, useCurrentUser } from "../../role-switcher";
-import { loadAuditLog, saveAuditLog } from "../audit-log-storage";
-import {
-  loadReviewComments,
-  saveReviewComments
-} from "../review-comment-storage";
+
+const emptyDelivery: DeliveryState = {
+  cohorts: [],
+  enrollments: [],
+  progressEvents: [],
+  quizAttempts: [],
+  smeAlerts: []
+};
 
 export function ProjectDetailClient({ projectId }: { projectId: string }) {
   const currentUser = useCurrentUser();
@@ -81,25 +98,15 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
   const canEnroll = hasPermission(currentUser.role, "enroll_learners");
   const canExport = hasPermission(currentUser.role, "export_reports");
   const canViewAudit = hasPermission(currentUser.role, "view_audit_log");
-  const [projects] = useState<TrainingProject[]>(loadTrainingProjects);
-  const [sources, setSources] = useState<SourceDocument[]>(() =>
-    loadSourceDocuments(projectId)
-  );
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(
-    sources[0]?.id ?? null
-  );
-  const [plans, setPlans] = useState<ProgramPlan[]>(() =>
-    loadProgramPlans(projectId)
-  );
-  const [artifacts, setArtifacts] = useState<ContentArtifact[]>(() =>
-    loadContentArtifacts(projectId)
-  );
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(
-    plans[0]?.id ?? null
-  );
-  const [deliveryState, setDeliveryState] = useState(() =>
-    loadDeliveryState(projectId)
-  );
+
+  const [loading, setLoading] = useState(true);
+  const [project, setProject] = useState<TrainingProject | null>(null);
+  const [sources, setSources] = useState<SourceDocument[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [plans, setPlans] = useState<ProgramPlan[]>([]);
+  const [artifacts, setArtifacts] = useState<ContentArtifact[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [deliveryState, setDeliveryState] = useState<DeliveryState>(emptyDelivery);
   const [cohortInput, setCohortInput] = useState({
     name: "Pilot Cohort",
     startDate: "",
@@ -111,15 +118,9 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     learnerEmail: "",
     learnerRoleId: ""
   });
-  const [selectedCohortId, setSelectedCohortId] = useState<string | null>(
-    deliveryState.cohorts[0]?.id ?? null
-  );
-  const [reviewComments, setReviewComments] = useState<ReviewComment[]>(() =>
-    loadReviewComments(projectId)
-  );
-  const [auditLog, setAuditLog] = useState<AuditEvent[]>(() =>
-    loadAuditLog(projectId)
-  );
+  const [selectedCohortId, setSelectedCohortId] = useState<string | null>(null);
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditEvent[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
@@ -133,36 +134,34 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
   } | null>(null);
 
   useEffect(() => {
-    fetch("/api/ai-status")
-      .then((res) => res.json())
-      .then(setAiStatus)
-      .catch(() =>
-        setAiStatus({ status: "offline", message: "Could not check AI status" })
-      );
-  }, []);
-
-  const project = useMemo(
-    () => projects.find((candidate) => candidate.id === projectId),
-    [projectId, projects]
-  );
-
-  if (!project) {
-    return (
-      <main className="main">
-        <section className="section">
-          <p className="eyebrow">Project detail</p>
-          <h1>Project not found</h1>
-          <p className="lead">
-            This draft project is stored locally in the browser used to create
-            it. Return to the workspace to create or open a project.
-          </p>
-          <Link className="button primary" href="/projects">
-            Back to projects
-          </Link>
-        </section>
-      </main>
-    );
-  }
+    Promise.all([
+      fetchProjects(),
+      fetchSources(projectId),
+      fetchPlans(projectId),
+      fetchArtifacts(projectId),
+      fetchDeliveryState(projectId),
+      fetchComments(projectId),
+      fetchAuditLog(projectId),
+      fetch("/api/ai-status").then((r) => r.json()).catch(() => ({
+        status: "offline",
+        message: "Could not check AI status"
+      }))
+    ]).then(([projects, srcDocs, plns, arts, delivery, comments, audit, ai]) => {
+      const found = projects.find((p) => p.id === projectId) ?? null;
+      setProject(found);
+      setSources(srcDocs);
+      setSelectedSourceId(srcDocs[0]?.id ?? null);
+      setPlans(plns);
+      setSelectedPlanId(plns[0]?.id ?? null);
+      setArtifacts(arts);
+      setDeliveryState(delivery);
+      setSelectedCohortId(delivery.cohorts[0]?.id ?? null);
+      setReviewComments(comments);
+      setAuditLog(audit);
+      setAiStatus(ai);
+      setLoading(false);
+    });
+  }, [projectId]);
 
   const selectedSource =
     sources.find((source) => source.id === selectedSourceId) ?? sources[0];
@@ -211,9 +210,8 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
 
   function appendAudit(input: Omit<Parameters<typeof createAuditEvent>[0], "projectId">) {
     const event = createAuditEvent({ ...input, projectId });
-    const next = [event, ...auditLog];
-    setAuditLog(next);
-    saveAuditLog(projectId, next);
+    setAuditLog((prev) => [event, ...prev]);
+    apiCreateAuditEvent(projectId, event);
   }
 
   async function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
@@ -227,15 +225,14 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     const extractedSources = await Promise.all(
       files.map((file) => extractSourceDocument(projectId, file))
     );
-    const nextSources = [...extractedSources, ...sources];
 
-    setSources(nextSources);
-    saveSourceDocuments(projectId, nextSources);
+    setSources((prev) => [...extractedSources, ...prev]);
     setSelectedSourceId(extractedSources[0]?.id ?? selectedSourceId);
     setIsExtracting(false);
     event.target.value = "";
 
     for (const source of extractedSources) {
+      await apiCreateSource(projectId, source);
       appendAudit({
         eventType: source.extractionStatus === "failed" ? "source_extraction_failed" : "source_extracted",
         actor: "L&D Admin",
@@ -246,18 +243,17 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     }
   }
 
-  function toggleSourceActive(sourceId: string) {
-    const nextSources = sources.map((source) =>
-      source.id === sourceId
-        ? {
-            ...source,
-            isActiveForGeneration: !source.isActiveForGeneration
-          }
-        : source
-    );
+  async function toggleSourceActive(sourceId: string) {
+    const source = sources.find((s) => s.id === sourceId);
+    if (!source) return;
 
-    setSources(nextSources);
-    saveSourceDocuments(projectId, nextSources);
+    const toggled = !source.isActiveForGeneration;
+    setSources((prev) =>
+      prev.map((s) =>
+        s.id === sourceId ? { ...s, isActiveForGeneration: toggled } : s
+      )
+    );
+    await apiUpdateSource(projectId, sourceId, { isActiveForGeneration: toggled });
   }
 
   async function handleGeneratePlan() {
@@ -274,12 +270,11 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
         activeSources,
         versionNumber: plans.length + 1
       });
-      const nextPlans = [result.plan, ...plans];
 
-      setPlans(nextPlans);
-      saveProgramPlans(projectId, nextPlans);
+      setPlans((prev) => [result.plan, ...prev]);
       setSelectedPlanId(result.plan.id);
       setGenerationProvider(result.provider);
+      await apiCreatePlan(projectId, result.plan);
       appendAudit({
         eventType: "plan_generated",
         actor: "L&D Admin",
@@ -297,13 +292,13 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     }
   }
 
-  function updatePlanStatus(planId: string, status: ReviewStatus) {
-    const nextPlans = plans.map((plan) =>
-      plan.id === planId ? { ...plan, status } : plan
+  async function updatePlanStatus(planId: string, status: ReviewStatus) {
+    setPlans((prev) =>
+      prev.map((plan) =>
+        plan.id === planId ? { ...plan, status } : plan
+      )
     );
-
-    setPlans(nextPlans);
-    saveProgramPlans(projectId, nextPlans);
+    await apiUpdatePlan(projectId, planId, { status });
     appendAudit({
       eventType: "plan_status_changed",
       actor: status === "approved" || status === "locked" ? "SME" : "L&D Admin",
@@ -335,11 +330,12 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       const newArtifacts = result.artifacts.filter(
         (artifact) => !existingTypes.has(artifact.artifactType)
       );
-      const nextArtifacts = [...newArtifacts, ...artifacts];
 
-      setArtifacts(nextArtifacts);
-      saveContentArtifacts(projectId, nextArtifacts);
+      setArtifacts((prev) => [...newArtifacts, ...prev]);
       setGenerationProvider(result.provider);
+      for (const artifact of newArtifacts) {
+        await apiCreateArtifact(projectId, artifact);
+      }
       appendAudit({
         eventType: "artifact_generated",
         actor: "L&D Admin",
@@ -356,19 +352,16 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     }
   }
 
-  function updateArtifactStatus(artifactId: string, status: ReviewStatus) {
-    const nextArtifacts = artifacts.map((artifact) =>
-      artifact.id === artifactId
-        ? {
-            ...artifact,
-            status,
-            approvedAt: status === "approved" ? new Date().toISOString() : undefined
-          }
-        : artifact
+  async function updateArtifactStatus(artifactId: string, status: ReviewStatus) {
+    const approvedAt = status === "approved" ? new Date().toISOString() : undefined;
+    setArtifacts((prev) =>
+      prev.map((artifact) =>
+        artifact.id === artifactId
+          ? { ...artifact, status, approvedAt }
+          : artifact
+      )
     );
-
-    setArtifacts(nextArtifacts);
-    saveContentArtifacts(projectId, nextArtifacts);
+    await apiUpdateArtifact(projectId, artifactId, { status, approvedAt });
     const artifact = artifacts.find((a) => a.id === artifactId);
     appendAudit({
       eventType: "artifact_status_changed",
@@ -380,7 +373,7 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function handleAddComment(
+  async function handleAddComment(
     targetType: ReviewCommentTargetType,
     targetId: string,
     targetLabel: string
@@ -396,10 +389,9 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       authorName: project?.assignedSme ?? "SME",
       body: commentDraft.trim()
     });
-    const next = [comment, ...reviewComments];
-    setReviewComments(next);
-    saveReviewComments(projectId, next);
+    setReviewComments((prev) => [comment, ...prev]);
     setCommentDraft("");
+    await apiCreateComment(projectId, comment);
     appendAudit({
       eventType: "comment_added",
       actor: comment.authorName,
@@ -409,12 +401,20 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function handleResolveComment(commentId: string) {
-    const next = reviewComments.map((c) =>
-      c.id === commentId ? resolveComment(c, "L&D Admin") : c
+  async function handleResolveComment(commentId: string) {
+    setReviewComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId ? resolveComment(c, "L&D Admin") : c
+      )
     );
-    setReviewComments(next);
-    saveReviewComments(projectId, next);
+    const resolved = reviewComments.find((c) => c.id === commentId);
+    if (resolved) {
+      await apiUpdateComment(projectId, commentId, {
+        status: "resolved",
+        resolvedBy: "L&D Admin",
+        resolvedAt: new Date().toISOString()
+      });
+    }
     appendAudit({
       eventType: "comment_resolved",
       actor: "L&D Admin",
@@ -423,12 +423,17 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function handleDismissComment(commentId: string) {
-    const next = reviewComments.map((c) =>
-      c.id === commentId ? dismissComment(c, "L&D Admin") : c
+  async function handleDismissComment(commentId: string) {
+    setReviewComments((prev) =>
+      prev.map((c) =>
+        c.id === commentId ? dismissComment(c, "L&D Admin") : c
+      )
     );
-    setReviewComments(next);
-    saveReviewComments(projectId, next);
+    await apiUpdateComment(projectId, commentId, {
+      status: "dismissed",
+      resolvedBy: "L&D Admin",
+      resolvedAt: new Date().toISOString()
+    });
     appendAudit({
       eventType: "comment_dismissed",
       actor: "L&D Admin",
@@ -488,12 +493,7 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function persistDelivery(nextState: typeof deliveryState) {
-    setDeliveryState(nextState);
-    saveDeliveryState(projectId, nextState);
-  }
-
-  function handleCreateCohort(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateCohort(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!lockedPlan || !cohortInput.name.trim()) {
@@ -508,13 +508,13 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       endDate: cohortInput.endDate,
       instructorName: cohortInput.instructorName
     });
-    const nextState = {
-      ...deliveryState,
-      cohorts: [cohort, ...deliveryState.cohorts]
-    };
 
-    persistDelivery(nextState);
+    setDeliveryState((prev) => ({
+      ...prev,
+      cohorts: [cohort, ...prev.cohorts]
+    }));
     setSelectedCohortId(cohort.id);
+    await apiCreateCohort(projectId, cohort);
     appendAudit({
       eventType: "cohort_created",
       actor: "L&D Admin",
@@ -524,7 +524,7 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function handleEnrollLearner(event: FormEvent<HTMLFormElement>) {
+  async function handleEnrollLearner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!selectedCohort || !lockedPlan || !enrollmentInput.learnerName.trim()) {
@@ -549,15 +549,16 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       learnerRoleName: learnerRole.name
     });
 
-    persistDelivery({
-      ...deliveryState,
-      enrollments: [enrollment, ...deliveryState.enrollments]
-    });
+    setDeliveryState((prev) => ({
+      ...prev,
+      enrollments: [enrollment, ...prev.enrollments]
+    }));
     setEnrollmentInput({
       learnerName: "",
       learnerEmail: "",
       learnerRoleId: learnerRole.id
     });
+    await apiCreateEnrollment(projectId, enrollment);
     appendAudit({
       eventType: "enrollment_created",
       actor: "L&D Admin",
@@ -567,7 +568,7 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
     });
   }
 
-  function addProgressEvent(event: Omit<Parameters<typeof createProgressEvent>[0], "projectId" | "cohortId">) {
+  async function addProgressEvent(event: Omit<Parameters<typeof createProgressEvent>[0], "projectId" | "cohortId">) {
     if (!selectedCohort) {
       return;
     }
@@ -578,13 +579,14 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       ...event
     });
 
-    persistDelivery({
-      ...deliveryState,
-      progressEvents: [progressEvent, ...deliveryState.progressEvents]
-    });
+    setDeliveryState((prev) => ({
+      ...prev,
+      progressEvents: [progressEvent, ...prev.progressEvents]
+    }));
+    await apiCreateProgressEvent(projectId, progressEvent);
   }
 
-  function addQuizAttempt(enrollment: Enrollment, moduleId: string, score: number) {
+  async function addQuizAttempt(enrollment: Enrollment, moduleId: string, score: number) {
     if (!selectedCohort) {
       return;
     }
@@ -597,17 +599,18 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       score,
       maxScore: 100
     });
-    const nextAttempts = [attempt, ...deliveryState.quizAttempts];
-    const alerts = [...deliveryState.smeAlerts];
+
+    const updatedAttempts = [attempt, ...deliveryState.quizAttempts];
+    const newAlerts: SMEAlert[] = [];
 
     if (
       !attempt.passed &&
       shouldCreateQuizFailureAlert({
-        attempts: nextAttempts,
+        attempts: updatedAttempts,
         enrollmentId: enrollment.id,
         moduleId
       }) &&
-      !alerts.some(
+      !deliveryState.smeAlerts.some(
         (alert) =>
           alert.enrollmentId === enrollment.id &&
           alert.moduleId === moduleId &&
@@ -615,7 +618,7 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
           alert.status === "open"
       )
     ) {
-      alerts.unshift(
+      newAlerts.push(
         createSMEAlert({
           projectId,
           cohortId: selectedCohort.id,
@@ -627,68 +630,100 @@ export function ProjectDetailClient({ projectId }: { projectId: string }) {
       );
     }
 
-    persistDelivery({
-      ...deliveryState,
-      quizAttempts: nextAttempts,
-      progressEvents: [
-        createProgressEvent({
-          projectId,
-          cohortId: selectedCohort.id,
-          enrollmentId: enrollment.id,
-          moduleId,
-          eventType: "quiz_completed",
-          eventData: { score, passed: attempt.passed }
-        }),
-        ...deliveryState.progressEvents
-      ],
-      smeAlerts: alerts
+    const progressEvent = createProgressEvent({
+      projectId,
+      cohortId: selectedCohort.id,
+      enrollmentId: enrollment.id,
+      moduleId,
+      eventType: "quiz_completed",
+      eventData: { score, passed: attempt.passed }
     });
+
+    setDeliveryState((prev) => ({
+      ...prev,
+      quizAttempts: [attempt, ...prev.quizAttempts],
+      progressEvents: [progressEvent, ...prev.progressEvents],
+      smeAlerts: [...newAlerts, ...prev.smeAlerts]
+    }));
+
+    await apiCreateQuizAttempt(projectId, attempt);
+    await apiCreateProgressEvent(projectId, progressEvent);
+    for (const alert of newAlerts) {
+      await apiCreateSMEAlert(projectId, alert);
+    }
   }
 
-  function requestHelp(enrollment: Enrollment, moduleId: string) {
+  async function requestHelp(enrollment: Enrollment, moduleId: string) {
     if (!selectedCohort) {
       return;
     }
 
-    persistDelivery({
-      ...deliveryState,
-      progressEvents: [
-        createProgressEvent({
-          projectId,
-          cohortId: selectedCohort.id,
-          enrollmentId: enrollment.id,
-          moduleId,
-          eventType: "help_requested"
-        }),
-        ...deliveryState.progressEvents
-      ],
-      smeAlerts: [
-        createSMEAlert({
-          projectId,
-          cohortId: selectedCohort.id,
-          enrollmentId: enrollment.id,
-          moduleId,
-          triggerReason: "help_requested",
-          evidence: `${enrollment.learnerName} requested help.`
-        }),
-        ...deliveryState.smeAlerts
-      ]
+    const progressEvent = createProgressEvent({
+      projectId,
+      cohortId: selectedCohort.id,
+      enrollmentId: enrollment.id,
+      moduleId,
+      eventType: "help_requested"
     });
+    const alert = createSMEAlert({
+      projectId,
+      cohortId: selectedCohort.id,
+      enrollmentId: enrollment.id,
+      moduleId,
+      triggerReason: "help_requested",
+      evidence: `${enrollment.learnerName} requested help.`
+    });
+
+    setDeliveryState((prev) => ({
+      ...prev,
+      progressEvents: [progressEvent, ...prev.progressEvents],
+      smeAlerts: [alert, ...prev.smeAlerts]
+    }));
+
+    await apiCreateProgressEvent(projectId, progressEvent);
+    await apiCreateSMEAlert(projectId, alert);
   }
 
   function resolveAlert(alertId: string) {
-    persistDelivery({
-      ...deliveryState,
-      smeAlerts: deliveryState.smeAlerts.map((alert) =>
+    setDeliveryState((prev) => ({
+      ...prev,
+      smeAlerts: prev.smeAlerts.map((alert) =>
         alert.id === alertId
           ? {
               ...alert,
-              status: "resolved",
+              status: "resolved" as const,
               resolvedAt: new Date().toISOString()
             }
           : alert
       )
-    });
+    }));
+  }
+
+  if (loading) {
+    return (
+      <main className="main">
+        <section className="section">
+          <p className="muted">Loading project...</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!project) {
+    return (
+      <main className="main">
+        <section className="section">
+          <p className="eyebrow">Project detail</p>
+          <h1>Project not found</h1>
+          <p className="lead">
+            The project may not exist or has been deleted. Return to the workspace to create or open a project.
+          </p>
+          <Link className="button primary" href="/projects">
+            Back to projects
+          </Link>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -1335,4 +1370,3 @@ function formatArtifactType(type: ContentArtifact["artifactType"]) {
     .map((part) => part[0].toUpperCase() + part.slice(1))
     .join(" ");
 }
-

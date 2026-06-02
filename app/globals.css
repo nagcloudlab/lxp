@@ -866,3 +866,67 @@ h3 {
 .workspace-grid.single {
   display: block;
 }
+
+/* Login page */
+
+.login-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-panel .form-panel {
+  max-width: 400px;
+}
+
+.demo-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.demo-account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.demo-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+
+.demo-account-card:hover {
+  border-color: var(--primary);
+}
+
+.demo-account-card strong {
+  color: var(--foreground);
+}
+
+.demo-account-card small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.login-footer {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}

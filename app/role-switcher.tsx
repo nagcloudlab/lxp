@@ -1,15 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession, signIn, signOut } from "next-auth/react";
 import {
-  getDefaultUsers,
   getRoleLabel,
   loadCurrentUser,
-  saveCurrentUser
+  saveCurrentUser,
+  getDefaultUsers
 } from "@/lib/auth";
-import type { AppUser } from "@/lib/auth";
+import type { AppUser, UserRole } from "@/lib/auth";
 
 export function RoleSwitcher() {
+  const { data: session } = useSession();
+
+  if (session?.user) {
+    return (
+      <div className="role-switcher">
+        <span className="role-label">
+          {session.user.name} ({getRoleLabel(session.user.role)})
+        </span>
+        <button
+          className="button secondary"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          type="button"
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
+
+  return <FallbackRoleSwitcher />;
+}
+
+function FallbackRoleSwitcher() {
   const [currentUser, setCurrentUser] = useState<AppUser>(loadCurrentUser);
   const users = getDefaultUsers();
 
@@ -52,6 +76,16 @@ export function RoleSwitcher() {
 }
 
 export function useCurrentUser(): AppUser {
-  const [user] = useState<AppUser>(loadCurrentUser);
-  return user;
+  const { data: session } = useSession();
+
+  if (session?.user) {
+    return {
+      id: session.user.id,
+      name: session.user.name ?? "",
+      email: session.user.email ?? "",
+      role: (session.user.role ?? "learner") as UserRole
+    };
+  }
+
+  return loadCurrentUser();
 }
