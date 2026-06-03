@@ -114,6 +114,9 @@ export default function LoginPage() {
         </div>
 
         <div className="login-footer">
+          <span>Don&apos;t have an account? </span>
+          <Link href="/register">Create account</Link>
+          <span style={{ margin: "0 8px" }}>|</span>
           <Link href="/">Back to overview</Link>
         </div>
       </section>

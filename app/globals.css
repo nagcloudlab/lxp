@@ -930,3 +930,49 @@ h3 {
   padding-top: 1rem;
   border-top: 1px solid var(--border);
 }
+
+.login-footer a {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.form-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  min-height: 42px;
+  padding: 10px 12px;
+  width: 100%;
+  background: white;
+}
+
+/* Viewport meta handled by Next.js — improve touch targets */
+@media (max-width: 860px) {
+  .project-card dl {
+    grid-template-columns: 1fr;
+  }
+
+  .login-panel .form-panel {
+    max-width: 100%;
+  }
+
+  .demo-account-grid {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  .button {
+    width: 100%;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .source-preview-header {
+    flex-direction: column;
+  }
+}
