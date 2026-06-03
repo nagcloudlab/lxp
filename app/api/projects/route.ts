@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireAuth, requirePermission } from "@/lib/api-auth";
 import { deriveProjectStatus } from "@/lib/project-status";
 import type {
   ContentArtifact,
@@ -9,6 +10,9 @@ import type {
 } from "@/lib/training-projects";
 
 export async function GET() {
+  const user = await requireAuth();
+  if (user instanceof NextResponse) return user;
+
   const projects = await prisma.trainingProject.findMany({
     include: {
       sources: true,
@@ -53,6 +57,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const user = await requirePermission("create_project");
+  if (user instanceof NextResponse) return user;
+
   const body = await request.json();
   const project = await prisma.trainingProject.create({ data: body });
   return NextResponse.json(
